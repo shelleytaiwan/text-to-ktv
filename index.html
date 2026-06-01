@@ -237,7 +237,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     </div>
   </div>
 
-  <div class="credit">Shelleytaiwan 使用 AI 製作</div>
+  <div class="credit">Shelleytaiwan 使用 AI 製作 <span style="opacity:.55">· 版本 2026-05-31</span></div>
 </div>
 
 <!-- QR 視窗 -->
@@ -416,6 +416,7 @@ const STORE_TEXT = "ktv_last_text";
 const STORE_PY   = "ktv_use_pinyin";
 const STORE_MK   = "ktv_use_marks";
 const STORE_RG   = "ktv_region";
+const STORE_OV   = "ktv_overrides";   // 手動修改的音（聲調/讀音）
 function lsGet(k){ try{ return window.localStorage.getItem(k); }catch(e){ return null; } }
 function lsSet(k,v){ try{ window.localStorage.setItem(k,v); }catch(e){} }
 
@@ -428,6 +429,10 @@ const EXAMPLE_TEXT =
 /* 開啟時：優先帶回上次存的課文，沒有才用範例 */
 const savedText = lsGet(STORE_TEXT);
 textInput.value = (savedText && savedText.trim()) ? savedText : EXAMPLE_TEXT;
+
+/* 開啟時：帶回上次手動修改的音（只在課文相同時才會套用） */
+let savedOv = null;
+try{ const __raw = lsGet(STORE_OV); if(__raw){ savedOv = JSON.parse(__raw); } }catch(e){ savedOv = null; }
 
 /* 開啟時：帶回上次的開關偏好 */
 if(lsGet(STORE_PY)==="0"){ usePinyin=false; pyOptBtn.textContent='自動拼音：關'; pyOptBtn.classList.remove('on'); }
@@ -459,9 +464,15 @@ function render(text){
     buildLine(lineText).forEach(cell=>{
       const c=document.createElement('span');
       c.className='ch'+(cell.punct?' punct':'')+(cell.space?' space':'');
+      c.dataset.ci=String(cells.length);
+      if(!cell.punct){
+        c.dataset.dp=cell.p||'';
+        c.dataset.dt=(cell.tone==null)?'n':String(cell.tone);
+        c.dataset.dsd=cell.sandhi?'1':'0';
+      }
       const mk=document.createElement('span'); mk.className='mark';
       if(!cell.punct){
-        setMark(mk, markSVG(cell.tone, cell.sandhi));
+        setMarkT(mk, cell.tone, cell.sandhi);
         mk.addEventListener('click', ()=> openMarkPicker(mk));
       }
       const hz=document.createElement('span'); hz.className='hz'; hz.textContent=cell.c;
@@ -478,7 +489,7 @@ function render(text){
           function apply(r){
             const val=(r==='pu')?cell.diff.pu:cell.diff.guo;
             lbl.textContent=val;
-            setMark(mk, markSVG(toneFromSymbol(val), false));
+            setMarkT(mk, toneFromSymbol(val), false);
           }
           sel.value=region; apply(region);
           sel.addEventListener('change', ()=>apply(sel.value));
@@ -488,7 +499,7 @@ function render(text){
           py.textContent = cell.p || (readings && readings[0]) || '';
           py.spellcheck=false;
           // 手打拼音時 → 記號跟著（輕聲/各調自動判斷）
-          py.addEventListener('input', ()=>{ setMark(mk, markSVG(toneOfText(py.textContent), false)); });
+          py.addEventListener('input', ()=>{ setMarkT(mk, toneOfText(py.textContent), false); });
           if(readings && readings.length>1){
             /* 多音字：點拼音 → 跳讀音小選單（不用打字）；清單沒有想要的可選「自己打」。
                初始記號保留 buildLine 算好的（含變調），等使用者真的改才更新。 */
@@ -520,6 +531,7 @@ makeBtn.addEventListener('click', ()=>{
   } else pyWarn.classList.add('hidden');
   lastText = text;
   render(text);
+  if(savedOv && savedOv.t===text && Array.isArray(savedOv.ov)) applyOverrides(savedOv.ov);
   // 同步播放畫面開關狀態
   stage.classList.toggle('hide-py', !usePinyin);
   stage.classList.toggle('hide-marks', !useMarks);
@@ -528,8 +540,12 @@ makeBtn.addEventListener('click', ()=>{
   reset();
   setup.classList.add('hidden'); player.classList.remove('hidden');
 });
-backBtn.addEventListener('click', ()=>{ pause(); player.classList.add('hidden'); setup.classList.remove('hidden'); });
-clearBtn.addEventListener('click', ()=>{ textInput.value=""; lsSet(STORE_TEXT,""); textInput.focus(); });
+backBtn.addEventListener('click', ()=>{ saveOv(); pause(); player.classList.add('hidden'); setup.classList.remove('hidden'); });
+clearBtn.addEventListener('click', ()=>{ textInput.value=""; lsSet(STORE_TEXT,""); lsSet(STORE_OV,""); savedOv=null; textInput.focus(); });
+/* 離開／切到背景時自動保存目前修改，下次打開就還在 */
+window.addEventListener('pagehide', saveOv);
+window.addEventListener('beforeunload', saveOv);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') saveOv(); });
 
 /* ===== 播放 ===== */
 function setProgress(){ prog.style.width = cells.length?(idx/cells.length*100)+'%':'0%'; }
@@ -575,13 +591,77 @@ function b64d(s){
   return new TextDecoder().decode(bytes);
 }
 function baseURL(){ return location.href.split('#')[0]; }
+
+/* ===== 手動修改（聲調/讀音）的收集、套用、儲存 ===== */
+/* 收集目前畫面上「和自動產生不一樣」的字（只存差異，網址才不會太長） */
+function collectOverrides(){
+  const ov=[];
+  document.querySelectorAll('#stage .ch').forEach(c=>{
+    if(c.classList.contains('punct')) return;
+    if(c.dataset.ci==null) return;
+    const i=+c.dataset.ci;
+    const mk=c.querySelector('.mark');
+    if(c.classList.contains('hasdiff')){          // 兩岸異讀字：記住所選的 國語/普通話
+      const sel=c.querySelector('select.pysel');
+      if(sel && sel.value && sel.value!==region){ ov.push({i, dr:sel.value}); }
+      return;
+    }
+    const py=c.querySelector('.py');
+    const curP=py?(py.textContent||'').trim():'';
+    const curTok=mk?(mk.dataset.tone||'n'):'n';
+    const curSd=mk?(mk.dataset.sd==='1'):false;
+    const free=!!(py && py.dataset && py.dataset.free);
+    const defP=c.dataset.dp||'';
+    const defTok=c.dataset.dt||'n';
+    const defSd=c.dataset.dsd==='1';
+    const o={};
+    if(curP!==defP) o.p=curP;
+    if(curTok!==defTok) o.t=curTok;
+    if(curSd!==defSd) o.s=curSd?1:0;
+    if(free) o.f=1;
+    if(Object.keys(o).length){ o.i=i; ov.push(o); }
+  });
+  return ov;
+}
+/* 把收集到的修改重新套回畫面（render 之後呼叫） */
+function applyOverrides(ov){
+  if(!Array.isArray(ov)||!ov.length) return;
+  const map=new Map(); ov.forEach(o=>{ if(o && o.i!=null) map.set(+o.i, o); });
+  document.querySelectorAll('#stage .ch').forEach(c=>{
+    if(c.classList.contains('punct')) return;
+    const o=map.get(+c.dataset.ci); if(!o) return;
+    const mk=c.querySelector('.mark'), py=c.querySelector('.py');
+    if(c.classList.contains('hasdiff')){
+      if(o.dr){ const sel=c.querySelector('select.pysel'); if(sel){ sel.value=o.dr; sel.dispatchEvent(new Event('change')); } }
+      return;
+    }
+    if(py){
+      if(o.f){ py.classList.remove('poly'); py.dataset.free='1'; py.contentEditable='true'; py.spellcheck=false; }
+      if(typeof o.p==='string') py.textContent=o.p;
+    }
+    if(mk && ('t' in o || 's' in o)){
+      const tone = ('t' in o) ? (o.t==='n'?null:+o.t)
+                              : ((!mk.dataset.tone||mk.dataset.tone==='n')?null:+mk.dataset.tone);
+      const sd   = ('s' in o) ? !!o.s : (mk.dataset.sd==='1');
+      setMarkT(mk, tone, sd);
+    }
+  });
+}
+/* 把目前修改存進瀏覽器（綁定目前課文；課文不同就不會誤套） */
+function saveOv(){
+  if(!lastText) return;
+  try{ const ov=collectOverrides(); savedOv={t:lastText, ov}; lsSet(STORE_OV, JSON.stringify(savedOv)); }catch(e){}
+}
+
 function currentText(){
   if(!player.classList.contains('hidden') && lastText) return lastText;
   return (textInput.value||'').trim();
 }
 function buildShareURL(){
   const t=currentText(); if(!t) return null;
-  return baseURL()+'#t='+b64e(t)+'&r='+region+'&p='+(usePinyin?'1':'0')+'&m='+(useMarks?'1':'0');
+  let url=baseURL()+'#t='+b64e(t)+'&r='+region+'&p='+(usePinyin?'1':'0')+'&m='+(useMarks?'1':'0');
+  try{ const ov=collectOverrides(); if(ov && ov.length) url+='&o='+b64e(JSON.stringify(ov)); }catch(e){}
+  return url;
 }
 
 /* 小提示泡泡 */
@@ -632,8 +712,8 @@ qrMask.addEventListener('click', e=>{ if(e.target===qrMask) closeQR(); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeQR(); });
 qrCopy.addEventListener('click', async ()=>{ const ok=await copyText(qrUrlEl.textContent); toast(ok?'已複製分享連結 ✓':'請長按網址手動複製'); });
 
-/* 開啟時：若網址帶了課文，就自動帶出並直接進入朗讀畫面 */
-(function loadFromHash(){
+/* 開啟時：若網址帶了課文，就自動帶出並直接進入朗讀畫面（在所有定義就緒後才於檔尾呼叫） */
+function loadFromHash(){
   const h=location.hash.replace(/^#/,''); if(!h) return;
   const p={}; h.split('&').forEach(kv=>{ const i=kv.indexOf('='); if(i>0) p[kv.slice(0,i)]=kv.slice(i+1); });
   if(!p.t) return;
@@ -643,14 +723,23 @@ qrCopy.addEventListener('click', async ()=>{ const ok=await copyText(qrUrlEl.tex
   if(p.r==='pu'||p.r==='guo'){ region=p.r; lsSet(STORE_RG,region); syncRegionBtn(); }
   if(p.p==='0'||p.p==='1'){ usePinyin=(p.p==='1'); pyOptBtn.textContent='自動拼音：'+(usePinyin?'開':'關'); pyOptBtn.classList.toggle('on',usePinyin); }
   if(p.m==='0'||p.m==='1'){ useMarks=(p.m==='1'); markOptBtn.textContent='朗讀記號：'+(useMarks?'開':'關'); markOptBtn.classList.toggle('on',useMarks); }
+  let hashOv=null;
+  if(p.o){ try{ hashOv=JSON.parse(b64d(p.o)); }catch(e){ hashOv=null; } }
   makeBtn.click();  // 直接產生 KTV → 進入朗讀畫面（按 ▶ 開始 即可唸）
-})();
+  if(Array.isArray(hashOv) && hashOv.length){ applyOverrides(hashOv); saveOv(); }
+}
 
 /* ========================================================================
    手動調整朗讀記號：點字上方的記號 → 跳出小選單挑聲調
    ======================================================================== */
 /* 設定某個記號格的內容，順便標示「不標(空)」狀態方便看出仍可點 */
 function setMark(mk, html){ mk.innerHTML=html||''; mk.classList.toggle('empty', !html); }
+/* 設定記號並把聲調/變調記在 mark 上，方便之後序列化保存 */
+function setMarkT(mk, tone, sandhi){
+  setMark(mk, markSVG(tone, sandhi));
+  mk.dataset.tone = (tone==null)?'n':String(tone);
+  mk.dataset.sd = sandhi?'1':'0';
+}
 
 /* ===== 把聲調套到拼音上（記號→拼音連動用） ===== */
 const TM={ 'a':'āáǎàa','e':'ēéěèe','i':'īíǐìi','o':'ōóǒòo','u':'ūúǔùu','ü':'ǖǘǚǜü' };
@@ -697,7 +786,7 @@ MARK_OPTS.forEach(o=>{
   b.addEventListener('click', (e)=>{
     e.stopPropagation();
     if(markTarget){
-      setMark(markTarget, markSVG(o.tone, o.sd));
+      setMarkT(markTarget, o.tone, o.sd);
       // 記號 → 拼音連動：把對應的拼音調號改成所選聲調
       const ch=markTarget.closest('.ch');
       const py=ch && ch.querySelector('.py');
@@ -760,7 +849,7 @@ function openPyPicker(py, mk, readings){
     b.addEventListener('click', (e)=>{
       e.stopPropagation();
       if(pyTarget) pyTarget.textContent=r;
-      if(pyTargetMark) setMark(pyTargetMark, markSVG(toneFromSymbol(r), false));
+      if(pyTargetMark) setMarkT(pyTargetMark, toneFromSymbol(r), false);
       closePyPicker();
     });
     pyPicker.appendChild(b);
@@ -804,6 +893,9 @@ document.addEventListener('click', (e)=>{
 window.addEventListener('scroll', closeAllPickers, true);
 window.addEventListener('resize', closeAllPickers);
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAllPickers(); });
+
+/* 全部定義就緒後，才處理網址帶來的課文/設定/手動修改 */
+loadFromHash();
 </script>
 </body>
 </html>
