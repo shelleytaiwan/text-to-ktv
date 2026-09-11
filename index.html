@@ -110,6 +110,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
   .done{text-align:center;font-family:"Noto Serif TC",serif;font-weight:900;font-size:24px;color:var(--teal-deep);opacity:0;height:0;overflow:hidden;transition:opacity .4s ease;}
   .done.show{opacity:1;height:auto;margin-top:4px;}
   .hint{color:var(--ink-soft);font-weight:700;font-size:13px;text-align:center;}
+  .ai-note{text-align:center;color:var(--ink-soft);font-weight:700;font-size:13px;margin-top:22px;opacity:.8;}
   .credit{text-align:center;color:var(--ink-soft);font-weight:700;font-size:12px;opacity:.7;margin-top:22px;}
   .warn{color:#b5482f;font-weight:800;font-size:13px;text-align:center;}
   .hidden{display:none !important;}
@@ -231,7 +232,6 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       <div class="drop" id="dropZone">
         <div class="dz-ic">📸</div>
         <div class="dz-t">上傳或拖放有中文字的相片</div>
-        <div class="dz-s">AI 自動截取乾淨的漢字主體，拼音、注音標註會自動濾掉（簡繁皆可，免金鑰、需網路）。結果放到下方文字框；錯字可在框內改，或產生 KTV 後直接點漢字修正</div>
         <input type="file" id="fileInput" accept="image/*" hidden>
       </div>
       <textarea id="textInput" placeholder="把文章貼在這裡⋯⋯（會自動依標點和換行排版）"></textarea>
@@ -245,14 +245,6 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         <button class="btn-ghost" id="clearBtn">🗑 清空</button>
       </div>
       <div class="legend" id="legend"></div>
-      <div class="note">
-        <b>聲調記號：</b>一聲 ─ 高平、二聲 ╱ 上揚、三聲 ﹀ 短而低、四聲 ╲ 下降、輕聲 · 小點。
-        三聲接三聲會自動<b>變調</b>念二聲（橘色標示）。<br>
-        <b>「和」</b>當連接詞時自動標台灣念法 <b>hàn</b>；「和平、溫和、和尚」等詞保留 <b>hé</b>。多音字標錯可<b>點拼音改讀音</b>、<b>點字上方記號改聲調</b>。一般多音字（行、重、長、假…）的拼音會有<b>虛線底線</b>，點一下就能從清單選讀音，<b>不用打字</b>。<br>
-        <b>分享給學生</b>：工具若放在網頁空間（網址 http 開頭），右上角 連結/QR 學生直接開；若從電腦檔案開啟，請用「<b>💾 課文檔</b>」存檔傳給學生（LINE/Email），打開就是你展示的畫面。<br>
-        <b>兩岸異讀字</b>（企、期、危、帆、質、究、攜⋯⋯）會以<b>綠色晶片</b>標示，點一下即可切換 <b>國語／普通話</b> 讀音；上方「預設讀音」可一次設定整篇要用哪一套。<br>
-        <b>注音符號</b>直立標在字的<b>右邊</b>；<b>點注音</b>可挑讀音或「自己打注音」——注音只連動<b>朗讀記號</b>，<b>不會動到拼音</b>（學普通話拼音和學台灣注音的學生可各看各的）；沒手動改過的注音才會自動跟著拼音變。<b>點漢字</b>可直接改錯字（辨識錯誤用），改完該字讀音自動重標、其他修改保留。可用「自動注音」開關。簡繁課文可按「<b>簡 ⇄ 繁</b>」一鍵互轉。
-      </div>
       <div class="warn hidden" id="pyWarn"></div>
     </div>
   </div>
@@ -277,7 +269,6 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       </div>
       <div class="bar"><i id="prog"></i></div>
       <div class="done" id="done">🎉 全部唸完了,太棒了!</div>
-      <div class="hint">點字<b>上方記號</b>改聲調，下方<b>拼音會自動跟著</b>（如改輕聲 gè→ge）；點<b>拼音</b>改拼音、點<b>注音</b>改注音（兩者互不影響，<b>朗讀記號</b>跟著最後改的那個）；點<b>漢字</b>可改錯字。按 <b>🔊 朗讀</b> 整篇 AI 朗讀，句子間會停頓換氣，速度跟著「速度」滑桿。</div>
     </div>
   </div>
 
@@ -580,6 +571,9 @@ function render(text){
     });
     stage.appendChild(ld);
   });
+  const an=document.createElement('div'); an.className='ai-note';
+  an.textContent='※ AI 的發音不一定絕對正確，有問題請問老師';
+  stage.appendChild(an);
 }
 
 makeBtn.addEventListener('click', ()=>{
@@ -1436,6 +1430,78 @@ dropZone.addEventListener('drop', e=>{ e.preventDefault(); dropZone.classList.re
 /* =====================================================================
    🔊 AI 朗讀（裝置語音合成）：句子間自動停頓換氣；速度跟「速度」滑桿
    ===================================================================== */
+/* ===== 讓朗讀跟著「變調記號」念 =====
+   裝置語音引擎無法逐字指定聲調，所以用偷吃步：
+   朗讀前把畫面上標了「變調」(三聲→二聲) 的字，偷換成
+   「同音節、本調就是二聲」的字（只換給引擎聽，畫面不變）。
+   例：小「雨」傘 → 念時換成「魚」→ 引擎自然念 yú。
+   ⚠ 安全原則：表內只收「兩岸讀音一致、且只有一種讀音」的字，
+   寧可音調由引擎決定，也不能換到音節錯的字
+   （教訓：淆 大陸念 xiáo、台灣念 yáo，曾把「小」念成「搖」）。
+   沒有安全同音字的音節（如 wǒ我、gěi給、suǒ所、xiǎo小、kě可、
+   shuǐ水、jiǎo腳）一律保留原字，由引擎自行處理。表可自行增刪。 */
+const SANDHI_T2={
+  ba:'拔', bai:'白', bao:'雹', bi:'鼻', bie:'別', bo:'伯',
+  cai:'才', can:'殘', ceng:'層', cha:'茶', chai:'柴', chan:'蟬',
+  chang:'常', chao:'潮', chen:'陳', cheng:'成', chi:'池', chong:'蟲', chou:'愁',
+  chu:'除', chuan:'船', chuang:'床', chui:'垂', chun:'純', ci:'詞', cong:'從', cun:'存',
+  da:'達', de:'德', di:'敵', die:'疊', du:'讀', duo:'奪',
+  e:'鵝', er:'兒',
+  fa:'罰', fan:'凡', fang:'房', fei:'肥', fen:'墳', feng:'逢', fu:'福',
+  ge:'格', guo:'國',
+  hai:'孩', han:'含', hang:'航', hao:'豪', he:'河', hen:'痕', heng:'橫',
+  hong:'紅', hou:'猴', hu:'湖', huan:'環', huang:'黃', hui:'回', hun:'魂', huo:'活',
+  ji:'急', jia:'頰', jie:'節', ju:'局', jue:'絕',
+  kang:'扛', kuang:'狂', kui:'葵',
+  lai:'來', lan:'藍', lang:'狼', lao:'勞', lei:'雷', li:'離', lian:'連',
+  liang:'良', liao:'聊', lin:'林', ling:'零', liu:'流', long:'龍', lou:'樓',
+  lu:'爐', 'lü':'驢', lun:'輪', luo:'羅',
+  ma:'麻', mai:'埋', man:'蠻', mang:'忙', mao:'毛', mei:'沒', men:'門', meng:'萌',
+  mi:'迷', mian:'棉', miao:'苗', min:'民', ming:'明', mo:'魔', mou:'謀',
+  na:'拿', nan:'南', nao:'撓', neng:'能', ni:'泥', nian:'年', niang:'娘',
+  ning:'寧', niu:'牛', nong:'農', nu:'奴', nuo:'挪',
+  pa:'爬', pai:'排', pan:'盤', pang:'旁', pao:'袍', pei:'陪', pen:'盆', peng:'朋',
+  pi:'皮', pin:'貧', ping:'平', po:'婆', pu:'葡',
+  qi:'齊', qian:'錢', qiang:'強', qiao:'橋', qie:'茄', qin:'琴', qing:'晴',
+  qiong:'窮', qiu:'球', qu:'渠', quan:'全', qun:'群',
+  ran:'然', rao:'饒', ren:'人', reng:'仍', rong:'容', rou:'柔', ru:'如',
+  she:'蛇', shen:'神', sheng:'繩', shi:'時', su:'俗', sui:'隨',
+  tai:'台', tan:'談', tang:'糖', tao:'桃', teng:'疼', ti:'提', tian:'田',
+  tiao:'條', ting:'停', tong:'同', tou:'頭', tu:'圖', tuan:'團', tuo:'駝',
+  wa:'娃', wan:'完', wang:'王', wei:'維', wen:'文', wu:'無',
+  xi:'習', xia:'霞', xian:'閒', xiang:'祥', xie:'鞋', xing:'形',
+  xiong:'雄', xu:'徐', xuan:'玄', xue:'學', xun:'尋',
+  ya:'牙', yan:'言', yang:'羊', yao:'搖', ye:'爺', yi:'移', yin:'銀', ying:'贏',
+  you:'油', yu:'魚', yuan:'圓', yun:'雲',
+  za:'雜', ze:'則', zei:'賊', zha:'閘', zhai:'宅', zhe:'哲',
+  zhi:'直', zhou:'軸', zhu:'竹', zu:'足', zuo:'昨'
+};
+/* 從播放畫面組出「朗讀專用」文字：標了變調的字換成二聲同音字，其餘照舊 */
+/* buildTTSText：送拼音（帶聲調符號）給引擎，而非漢字。
+   好處：手動改過的破音字讀音（如 解→xiè）引擎完全照單；
+         三聲變調直接從拼音標音讀，不再需要偷換同音字。
+   標點符號仍送原字讓引擎自然停頓。 */
+function buildTTSText(){
+  if(player.classList.contains('hidden')) return '';
+  const lines=[];
+  stage.querySelectorAll('.line').forEach(ld=>{
+    let s='';
+    ld.querySelectorAll('.ch').forEach(c=>{
+      const hz=c.querySelector('.hz'); if(!hz) return;
+      if(c.classList.contains('punct')){
+        s+=hz.textContent||''; return;
+      }
+      // 取拼音（手改後 .val 存的是改後的音）
+      const py=c.querySelector('.py');
+      const lbl=py?py.querySelector('.val'):null;
+      const pin=((lbl?lbl.textContent:(py?py.textContent:''))||'').trim();
+      if(pin) s+=pin+' ';
+      else s+=hz.textContent||'';
+    });
+    lines.push(s.trim());
+  });
+  return lines.join('\n').trim();
+}
 let ttsOn=false, ttsTimer=null;
 function splitSentences(text){
   const out=[]; let cur='';
@@ -1453,11 +1519,41 @@ function ttsRate(){
 function pickVoice(){
   try{
     const vs=window.speechSynthesis.getVoices()||[];
-    const want=(region==='pu')?['zh-cn','cmn-hans']:['zh-tw','cmn-hant'];
-    let v=vs.find(x=>{ const l=(x.lang||'').toLowerCase().replace('_','-'); return want.some(w=>l.indexOf(w)>=0); });
-    if(!v) v=vs.find(x=>(x.lang||'').toLowerCase().indexOf('zh')===0);
+    if(!vs.length) return null;
+    // 1) 優先指定聲音：繁體→美佳(Mei-Jia)，簡體→婷婷(Ting-Ting)，避免系統亂選到其他語言的語音
+    const nameWant=(region==='pu')
+      ? ['婷婷','ting-ting','tingting','ting ting']
+      : ['美佳','mei-jia','meijia','mei jia'];
+    let v=vs.find(x=>{
+      const n=(x.name||'').toLowerCase();
+      return nameWant.some(w=>n.indexOf(w.toLowerCase())>=0);
+    });
+    if(v) return v;
+    // 2) 找不到指定聲音時，退回用語系比對，但一定要是中文聲音
+    const want=(region==='pu')?['zh-cn','cmn-hans','zh-hans']:['zh-tw','cmn-hant','zh-hant'];
+    v=vs.find(x=>{ const l=(x.lang||'').toLowerCase().replace('_','-'); return want.some(w=>l.indexOf(w)>=0); });
+    if(v) return v;
+    // 3) 最後才退而求其次，找任何中文聲音（絕不使用非中文聲音）
+    v=vs.find(x=>(x.lang||'').toLowerCase().indexOf('zh')===0);
     return v||null;
   }catch(e){ return null; }
+}
+let voicesReadyResolved=false;
+function ensureVoicesLoaded(cb){
+  try{
+    const vs=window.speechSynthesis.getVoices()||[];
+    if(vs.length){ cb(); return; }
+    let done=false;
+    const finish=()=>{ if(done) return; done=true; cb(); };
+    window.speechSynthesis.onvoiceschanged=()=>{ voicesReadyResolved=true; finish(); };
+    // 有些瀏覽器（尤其是行動版）不會觸發 onvoiceschanged，改用輪詢保底
+    let tries=0;
+    const poll=setInterval(()=>{
+      tries++;
+      const vv=window.speechSynthesis.getVoices()||[];
+      if(vv.length || tries>20){ clearInterval(poll); finish(); }
+    },100);
+  }catch(e){ cb(); }
 }
 function stopTTS(){
   ttsOn=false; clearTimeout(ttsTimer);
@@ -1477,12 +1573,18 @@ function speakFrom(list, i){
 }
 function startTTS(){
   if(!('speechSynthesis' in window)){ toast('此瀏覽器不支援語音朗讀'); return; }
-  const t=lastText||currentText();
+  const t=buildTTSText() || lastText || currentText();   // 變調記號偷換成二聲同音字後朗讀
   if(!t){ toast('沒有課文可以朗讀'); return; }
   stopTTS();
   ttsOn=true; readBtn.textContent='⏹ 停止朗讀'; readBtn.classList.add('on');
   try{ window.speechSynthesis.cancel(); }catch(e){}
-  speakFrom(splitSentences(t), 0);
+  // 等聲音清單載入完成後才開始朗讀，避免瀏覽器用預設（可能非中文）的聲音亂念
+  ensureVoicesLoaded(()=>{
+    if(!ttsOn) return; // 使用者可能在等待期間已按停止
+    const v=pickVoice();
+    if(!v){ toast('找不到中文語音（美佳／婷婷），請確認裝置已安裝中文語音包'); }
+    speakFrom(splitSentences(t), 0);
+  });
 }
 readBtn.addEventListener('click', ()=> ttsOn?stopTTS():startTTS());
 try{ if('speechSynthesis' in window){ window.speechSynthesis.getVoices(); } }catch(e){}
