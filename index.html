@@ -1477,9 +1477,15 @@ const SANDHI_T2={
   zhi:'直', zhou:'軸', zhu:'竹', zu:'足', zuo:'昨'
 };
 /* 從播放畫面組出「朗讀專用」文字：標了變調的字換成二聲同音字，其餘照舊 */
-/* buildTTSText：送拼音（帶聲調符號）給引擎，而非漢字。
-   好處：手動改過的破音字讀音（如 解→xiè）引擎完全照單；
-         三聲變調直接從拼音標音讀，不再需要偷換同音字。
+/* buildTTSText：⚠ 一律送「漢字」給引擎，不要送拼音。
+   瀏覽器的中文語音引擎是照漢字念的，不是照拼音符號念──
+   之前改成整段送拼音（如 "xiǎo yǔ sǎn"）之後，引擎完全不認得
+   這種帶調號的羅馬拼音，於是整段完全發錯音，就是這次回報的問題。
+   還原成：一般字直接送漢字（讓引擎照自己的字典念，通常是對的）；
+   只有標了「變調」(三聲→二聲) 的字，才照原本的做法換成同音同調
+   的漢字（查 SANDHI_T2），一樣是送「漢字」給引擎，只是換一個字。
+   代價：使用者手動改過的破音字讀音（如 解→xiè）暫時無法強制引擎
+   照改過的音念，會退回引擎自己的預設讀音──這比「整段亂念」安全多了。
    標點符號仍送原字讓引擎自然停頓。 */
 function buildTTSText(){
   if(player.classList.contains('hidden')) return '';
@@ -1491,12 +1497,18 @@ function buildTTSText(){
       if(c.classList.contains('punct')){
         s+=hz.textContent||''; return;
       }
-      // 取拼音（手改後 .val 存的是改後的音）
-      const py=c.querySelector('.py');
-      const lbl=py?py.querySelector('.val'):null;
-      const pin=((lbl?lbl.textContent:(py?py.textContent:''))||'').trim();
-      if(pin) s+=pin+' ';
-      else s+=hz.textContent||'';
+      const mk=c.querySelector('.mark');
+      const isSandhi = !!(mk && mk.dataset.sd==='1');
+      if(isSandhi){
+        const py=c.querySelector('.py');
+        const lbl=py?py.querySelector('.val'):null;
+        const pin=((lbl?lbl.textContent:(py?py.textContent:''))||'').trim();
+        const syll=stripTone(pin.replace(/[^a-zA-Zü']/g,'').toLowerCase());
+        const homophone=SANDHI_T2[syll];
+        s+=(homophone||hz.textContent||'');
+      } else {
+        s+=hz.textContent||'';
+      }
     });
     lines.push(s.trim());
   });
@@ -1582,7 +1594,12 @@ function startTTS(){
   ensureVoicesLoaded(()=>{
     if(!ttsOn) return; // 使用者可能在等待期間已按停止
     const v=pickVoice();
-    if(!v){ toast('找不到中文語音（美佳／婷婷），請確認裝置已安裝中文語音包'); }
+    if(!v){
+      // 真的找不到中文語音：提示後就停止，不要用錯的語音硬念
+      toast('找不到中文語音（美佳／婷婷），請確認裝置已安裝中文語音包');
+      stopTTS();
+      return;
+    }
     speakFrom(splitSentences(t), 0);
   });
 }
