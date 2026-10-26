@@ -211,6 +211,11 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
   .py-picker .pyopt .pyt{font-size:13px;color:var(--ink-soft);margin-left:6px;}
   .hide-zy .ch .zy{display:none;}
   @media(max-width:640px){ .ch .zy .zg{font-size:11px;} }
+  .ch.fdone .hz{color:#1F9D6B}
+  .ch.fcur .hz{color:#1F9D6B}
+  .ch.recbad .hz{background:#FFE95A;border-radius:6px;cursor:pointer}
+  .recbox{margin:8px 0;font-size:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .recbox.hidden{display:none}
 </style>
 </head>
 <body>
@@ -254,9 +259,10 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     <div class="stage" id="stage"></div>
     <div class="panel">
       <div class="row">
-        <button class="btn-go" id="goBtn">▶ 開始</button>
-        <button class="btn-reset" id="resetBtn">↺ 重來</button>
         <button class="btn-ghost" id="readBtn">🔊 朗讀</button>
+        <button class="btn-ghost" id="followBtn">👂 跟讀</button>
+        <button class="btn-go" id="goBtn">🎤 KTV</button>
+        <button class="btn-reset" id="resetBtn">↺ 重來</button>
         <button class="btn-ghost on" id="pyBtn">拼音：開</button>
         <button class="btn-ghost on" id="marksBtn">朗讀記號：開</button>
         <button class="btn-ghost on" id="zhuyinBtn">注音：開</button>
@@ -272,7 +278,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     </div>
   </div>
 
-  <div class="credit">Shelleytaiwan 使用 AI 製作 <span style="opacity:.55">· 版本 2026-06-11</span></div>
+  <div class="credit">Shelleytaiwan 使用 AI 製作 <span style="opacity:.55">· 版本 2026-10</span></div>
 </div>
 
 <!-- QR 視窗 -->
@@ -577,8 +583,9 @@ function render(text){
 }
 
 makeBtn.addEventListener('click', ()=>{
-  const text=textInput.value.trim();
+  let text=textInput.value.trim();
   if(!text){ textInput.focus(); return; }
+  { const r=cleanArticle(text); if(r.text && r.text!==text){ text=r.text; textInput.value=text; if(r.dropped.length) toast('已自動略過非內文：'+r.dropped.slice(0,3).join('、')); } }
   // 記住這次的課文與偏好，下次打開自動帶回
   lsSet(STORE_TEXT, text);
   lsSet(STORE_PY, usePinyin?"1":"0");
@@ -622,8 +629,8 @@ function tick(){
 function start(){ if(running) return; if(idx>=cells.length) reset(); running=true;
   goBtn.textContent='⏸ 暫停'; goBtn.classList.remove('btn-go'); goBtn.classList.add('btn-reset'); done.classList.remove('show'); tick(); }
 function pause(){ running=false; clearTimeout(timer); goBtn.textContent='▶ 繼續'; goBtn.classList.add('btn-go'); goBtn.classList.remove('btn-reset'); }
-function finish(){ running=false; clearTimeout(timer); setProgress(); done.classList.add('show'); goBtn.textContent='▶ 開始'; goBtn.classList.add('btn-go'); goBtn.classList.remove('btn-reset'); }
-function reset(){ running=false; clearTimeout(timer); stopTTS(); idx=0; done.classList.remove('show'); cells.forEach(c=>c.el.classList.remove('gone')); setProgress(); goBtn.textContent='▶ 開始'; goBtn.classList.add('btn-go'); goBtn.classList.remove('btn-reset'); }
+function finish(){ running=false; clearTimeout(timer); setProgress(); done.classList.add('show'); goBtn.textContent='🎤 KTV'; goBtn.classList.add('btn-go'); goBtn.classList.remove('btn-reset'); }
+function reset(){ running=false; clearTimeout(timer); stopTTS(); idx=0; done.classList.remove('show'); cells.forEach(c=>c.el.classList.remove('gone')); setProgress(); goBtn.textContent='🎤 KTV'; goBtn.classList.add('btn-go'); goBtn.classList.remove('btn-reset'); }
 
 goBtn.addEventListener('click', ()=> running?pause():start());
 resetBtn.addEventListener('click', reset);
@@ -1472,7 +1479,7 @@ const SANDHI_T2={
   xi:'習', xia:'霞', xian:'閒', xiang:'祥', xie:'鞋', xing:'形',
   xiong:'雄', xu:'徐', xuan:'玄', xue:'學', xun:'尋',
   ya:'牙', yan:'言', yang:'羊', yao:'搖', ye:'爺', yi:'移', yin:'銀', ying:'贏',
-  you:'油', yu:'魚', yuan:'圓', yun:'雲',
+  yu:'魚', yuan:'圓', yun:'雲',
   za:'雜', ze:'則', zei:'賊', zha:'閘', zhai:'宅', zhe:'哲',
   zhi:'直', zhou:'軸', zhu:'竹', zu:'足', zuo:'昨'
 };
@@ -1505,9 +1512,9 @@ function buildTTSText(){
         const pin=((lbl?lbl.textContent:(py?py.textContent:''))||'').trim();
         const syll=stripTone(pin.replace(/[^a-zA-Zü']/g,'').toLowerCase());
         const homophone=SANDHI_T2[syll];
-        s+=(homophone||hz.textContent||'');
+        s+=(homophone||(hz.textContent==='友'?'有':hz.textContent)||'');
       } else {
-        s+=hz.textContent||'';
+        s+=(hz.textContent==='友'?'有':hz.textContent)||'';
       }
     });
     lines.push(s.trim());
@@ -1605,6 +1612,67 @@ function startTTS(){
 }
 readBtn.addEventListener('click', ()=> ttsOn?stopTTS():startTTS());
 try{ if('speechSynthesis' in window){ window.speechSynthesis.getVoices(); } }catch(e){}
+
+
+function cleanArticle(raw){
+  const dropped=[], keep=[];
+  const END=/[。！？!?」』）”"]$/;
+  String(raw).replace(/\r/g,'').split('\n').forEach(l=>{
+    const t=l.trim(); if(!t) return;
+    const lab=/^[（(]?[一二三四五六七八九十\d]+[）)]?\s*[、．.·‧•:：]\s*/.test(t);
+    const meta=(/\d{4}\s*[-/.年]\s*\d{1,2}\s*[-/.月]\s*\d{1,2}/.test(t)||/\d{1,2}\s*[:：]\s*\d{2}/.test(t))&&t.length<=40
+      ||/^(來源|来源|記者|记者|編輯|编辑|責編|责编|作者|攝影|摄影|原文|出處|出处|文\/|圖\/|图\/)/.test(t)||/^https?:\/\//.test(t)||/^[-—–\s]*\d{1,3}[-—–\s]*$/.test(t);
+    const head=lab&&t.length<=14&&!/[。！？!?，,]/.test(t)&&/(聽|听|讀|读|說|说|寫|写|看|練習|练习|課文|课文|閱讀|阅读|詞語|词语|生詞|生词|語法|语法|問題|问题|題目|题目|請|请|朗讀|跟讀)/.test(t);
+    if(head||meta){ dropped.push(t.length>12?t.slice(0,12)+'…':t); return; }
+    keep.push(t);
+  });
+  const wrapped=keep.filter(l=>l.length>=14&&!END.test(l)).length>=2;
+  let out=keep;
+  if(wrapped){
+    out=[]; let buf='';
+    keep.forEach((l,i)=>{
+      buf+=l;
+      const title=(out.length===0&&buf===l&&l.length<=30&&!END.test(l)&&i===0);
+      if(title||END.test(l)||l.length<14){ out.push(buf); buf=''; }
+    });
+    if(buf) out.push(buf);
+    out=out.join('\n').replace(/([。！？])(?![」』）”"\n])/g,'$1\n').split('\n').filter(Boolean);
+  }
+  return {text:out.join('\n'), dropped};
+}
+
+/* ===== 新增：跟讀 / 錄音 ===== */
+const followBtn=document.getElementById('followBtn');
+function cellTTS(c){ const el=c.el, hz=el.querySelector('.hz'), t=hz?(hz.textContent||''):''; if(c.punct) return t;
+  const mk=el.querySelector('.mark'); if(mk&&mk.dataset.sd==='1'){ const s=stripTone(cellPin(c).replace(/[^a-zA-Zü']/g,'').toLowerCase()); return SANDHI_T2[s]||(t==='友'?'有':t); } return t==='友'?'有':t; }
+function cellPin(c){ const py=c.el.querySelector('.py'), lbl=py&&py.querySelector('.val'); const m=((lbl?lbl.textContent:(py?py.textContent:''))||'').match(/[A-Za-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+/); return m?m[0]:''; }
+function cellTone(c){ return toneFromSymbol(cellPin(c)); }
+function speakZh(txt,rate){ try{ speechSynthesis.cancel(); }catch(e){} const u=new SpeechSynthesisUtterance(txt); u.lang=(region==='pu')?'zh-CN':'zh-TW'; const v=pickVoice(); if(v) u.voice=v; u.rate=rate||ttsRate(); speechSynthesis.speak(u); return u; }
+/* --- 跟讀：AI 念一句，字跟著變色，學生同步跟著唸 --- */
+let fOn=false, fTimer=null;
+function fClear(){ cells.forEach(c=>c.el.classList.remove('fdone','fcur')); }
+function fStop(){ if(!fOn) return; fOn=false; clearTimeout(fTimer); try{ speechSynthesis.cancel(); }catch(e){} followBtn.textContent='👂 跟讀'; followBtn.classList.remove('on'); }
+function fSentences(){ const out=[]; let cur=[]; cells.forEach((c,i)=>{ cur.push(c); const a=c.el.closest('.line'), b=cells[i+1]&&cells[i+1].el.closest('.line'); if((c.punct&&/[。！？；!?;]/.test(c.c))||a!==b){ out.push(cur); cur=[]; } }); if(cur.length) out.push(cur); return out; }
+function fSpeak(list,si){
+  if(!fOn) return; if(si>=list.length){ fStop(); toast('跟讀完成 👏'); return; }
+  const S=list[si], u=new SpeechSynthesisUtterance(S.map(cellTTS).join('')); u.lang=(region==='pu')?'zh-CN':'zh-TW'; const v=pickVoice(); if(v) u.voice=v; u.rate=ttsRate();
+  let k=-1; const adv=n=>{ if(n<=k||n>=S.length) return; if(k>=0){ S[k].el.classList.remove('fcur'); S[k].el.classList.add('fdone'); } k=n; S[k].el.classList.add('fcur'); try{ S[k].el.scrollIntoView({block:'nearest',behavior:'smooth'}); }catch(e){} };
+  const per=Math.max(110,stepDelay()*0.9);
+  const run=()=>{ if(!fOn) return; fTimer=setTimeout(()=>{ if(k+1<=S.length-2) adv(k+1); run(); },per); };
+  u.onstart=()=>{ adv(0); run(); };
+  u.onboundary=e=>{ if(typeof e.charIndex==='number'&&e.charIndex>k) adv(Math.min(e.charIndex,S.length-1)); };
+  const end=()=>{ clearTimeout(fTimer); S.forEach(c=>{ c.el.classList.remove('fcur'); c.el.classList.add('fdone'); }); if(fOn) fTimer=setTimeout(()=>fSpeak(list,si+1),500); };
+  u.onend=end; u.onerror=end; speechSynthesis.speak(u);
+}
+function followStart(){
+  if(!('speechSynthesis' in window)){ toast('此瀏覽器不支援語音朗讀'); return; }
+  reset(); fClear(); fOn=true; followBtn.textContent='⏹ 停止跟讀'; followBtn.classList.add('on');
+  ensureVoicesLoaded(()=>{ if(!fOn) return; if(!pickVoice()){ toast('找不到中文語音，請確認裝置已安裝中文語音包'); fStop(); return; } fSpeak(fSentences(),0); });
+}
+followBtn.addEventListener('click',()=>{ if(fOn){ fStop(); fClear(); } else followStart(); });
+const _stopTTS=stopTTS; stopTTS=function(){ _stopTTS(); fStop(); };
+goBtn.addEventListener('click',()=>{ fStop(); },true);
+readBtn.addEventListener('click',()=>{ fStop(); },true);
 
 /* 全部定義就緒後，才處理網址帶來的課文/設定/手動修改 */
 loadFromHash();
