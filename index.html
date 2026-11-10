@@ -269,7 +269,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         <button class="btn-ghost" id="backBtn">✎ 換文章</button>
         <div class="speed">
           <label>速度</label>
-          <input type="range" id="speed" min="120" max="1400" step="40" value="300">
+          <input type="range" id="speed" min="120" max="1600" step="20" value="1420">
           <span class="val" id="speedVal">每字 0.30 秒</span>
         </div>
       </div>
@@ -618,7 +618,7 @@ document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState=
 
 /* ===== 播放 ===== */
 function setProgress(){ prog.style.width = cells.length?(idx/cells.length*100)+'%':'0%'; }
-function stepDelay(){ return parseInt(speed.value,10); }
+function stepDelay(){ return 1720-parseInt(speed.value,10); }  /* 滑桿左=慢(1.6秒) 右=快(0.12秒) */
 function tick(){
   if(idx>=cells.length){ finish(); return; }
   const cur=cells[idx]; setProgress();
@@ -637,7 +637,7 @@ resetBtn.addEventListener('click', reset);
 pyBtn.addEventListener('click', ()=>{ const h=stage.classList.toggle('hide-py'); pyBtn.textContent='拼音：'+(h?'關':'開'); pyBtn.classList.toggle('on',!h); });
 marksBtn.addEventListener('click', ()=>{ const h=stage.classList.toggle('hide-marks'); marksBtn.textContent='朗讀記號：'+(h?'關':'開'); marksBtn.classList.toggle('on',!h); });
 zhuyinBtn.addEventListener('click', ()=>{ const h=stage.classList.toggle('hide-zy'); zhuyinBtn.textContent='注音：'+(h?'關':'開'); zhuyinBtn.classList.toggle('on',!h); });
-speed.addEventListener('input', ()=>{ speedVal.textContent='每字 '+(speed.value/1000).toFixed(2)+' 秒'; });
+speed.addEventListener('input', ()=>{ speedVal.textContent='每字 '+(stepDelay()/1000).toFixed(2)+' 秒'; });
 
 /* ========================================================================
    分享網址 / 複製 / QR Code
@@ -1479,7 +1479,7 @@ const SANDHI_T2={
   xi:'習', xia:'霞', xian:'閒', xiang:'祥', xie:'鞋', xing:'形',
   xiong:'雄', xu:'徐', xuan:'玄', xue:'學', xun:'尋',
   ya:'牙', yan:'言', yang:'羊', yao:'搖', ye:'爺', yi:'移', yin:'銀', ying:'贏',
-  yu:'魚', yuan:'圓', yun:'雲',
+  yu:'魚', you:'由', yuan:'圓', yun:'雲',
   za:'雜', ze:'則', zei:'賊', zha:'閘', zhai:'宅', zhe:'哲',
   zhi:'直', zhou:'軸', zhu:'竹', zu:'足', zuo:'昨'
 };
@@ -1494,6 +1494,22 @@ const SANDHI_T2={
    代價：使用者手動改過的破音字讀音（如 解→xiè）暫時無法強制引擎
    照改過的音念，會退回引擎自己的預設讀音──這比「整段亂念」安全多了。
    標點符號仍送原字讓引擎自然停頓。 */
+/* 友/有 後面接三聲字（如 友美）要念二聲 yóu；引擎常念成 魚，所以改送「由」 */
+function tidyYou(str){
+  let out='';
+  for(let i=0;i<str.length;i++){
+    const ch=str[i];
+    if(ch==='友'){
+      let nx=str[i+1]||'', t3=false;
+      if(nx && /[\u3400-\u9fff]/.test(nx)){
+        try{ const p=pinyinPro.pinyin(nx,{type:'array',toneType:'num'})[0]||''; t3=/3$/.test(p); }catch(e){}
+      }
+      out+= t3 ? '由' : '有';
+    } else out+=ch;
+  }
+  return out;
+}
+function leadPause(txt){ return /^[友由]/.test(txt)?'，'+txt:txt; }
 function buildTTSText(){
   if(player.classList.contains('hidden')) return '';
   const lines=[];
@@ -1512,14 +1528,14 @@ function buildTTSText(){
         const pin=((lbl?lbl.textContent:(py?py.textContent:''))||'').trim();
         const syll=stripTone(pin.replace(/[^a-zA-Zü']/g,'').toLowerCase());
         const homophone=SANDHI_T2[syll];
-        s+=(homophone||(hz.textContent==='友'?'有':hz.textContent)||'');
+        s+=(homophone||hz.textContent||'');
       } else {
-        s+=(hz.textContent==='友'?'有':hz.textContent)||'';
+        s+=hz.textContent||'';
       }
     });
     lines.push(s.trim());
   });
-  return lines.join('\n').trim();
+  return tidyYou(lines.join('\n').trim());
 }
 let ttsOn=false, ttsTimer=null;
 function splitSentences(text){
@@ -1532,8 +1548,10 @@ function splitSentences(text){
   return out.filter(s=>/[\u3400-\u9fffA-Za-z0-9]/.test(s));
 }
 function ttsRate(){
-  const v=parseInt(speed.value,10)||300;
-  return Math.max(0.5, Math.min(1.3, 1.2 - (v/1400)*0.7));
+  const v=stepDelay()||300;
+  // 快速端（<=300ms）維持原本算法；慢速端 300→1600ms 線性降到 0.2
+  if(v<=300) return Math.max(0.5, Math.min(1.3, 1.2 - (v/1400)*0.7));
+  return Math.max(0.2, 1.05 - (v-300)/1300*0.85);
 }
 function pickVoice(){
   try{
@@ -1582,7 +1600,7 @@ function stopTTS(){
 function speakFrom(list, i){
   if(!ttsOn) return;
   if(i>=list.length){ stopTTS(); return; }
-  const u=new SpeechSynthesisUtterance(list[i]);
+  const u=new SpeechSynthesisUtterance(leadPause(list[i]));
   u.lang=(region==='pu')?'zh-CN':'zh-TW';
   const v=pickVoice(); if(v) u.voice=v;
   u.rate=ttsRate();
@@ -1607,7 +1625,7 @@ function startTTS(){
       stopTTS();
       return;
     }
-    speakFrom(splitSentences(t), 0);
+    ttsTimer=setTimeout(()=>speakFrom(splitSentences(t), 0), 900); // 開頭先留一口氣再念
   });
 }
 readBtn.addEventListener('click', ()=> ttsOn?stopTTS():startTTS());
@@ -1644,7 +1662,7 @@ function cleanArticle(raw){
 /* ===== 新增：跟讀 / 錄音 ===== */
 const followBtn=document.getElementById('followBtn');
 function cellTTS(c){ const el=c.el, hz=el.querySelector('.hz'), t=hz?(hz.textContent||''):''; if(c.punct) return t;
-  const mk=el.querySelector('.mark'); if(mk&&mk.dataset.sd==='1'){ const s=stripTone(cellPin(c).replace(/[^a-zA-Zü']/g,'').toLowerCase()); return SANDHI_T2[s]||(t==='友'?'有':t); } return t==='友'?'有':t; }
+  const mk=el.querySelector('.mark'); if(mk&&mk.dataset.sd==='1'){ const s=stripTone(cellPin(c).replace(/[^a-zA-Zü']/g,'').toLowerCase()); return SANDHI_T2[s]||t; } return t; }
 function cellPin(c){ const py=c.el.querySelector('.py'), lbl=py&&py.querySelector('.val'); const m=((lbl?lbl.textContent:(py?py.textContent:''))||'').match(/[A-Za-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+/); return m?m[0]:''; }
 function cellTone(c){ return toneFromSymbol(cellPin(c)); }
 function speakZh(txt,rate){ try{ speechSynthesis.cancel(); }catch(e){} const u=new SpeechSynthesisUtterance(txt); u.lang=(region==='pu')?'zh-CN':'zh-TW'; const v=pickVoice(); if(v) u.voice=v; u.rate=rate||ttsRate(); speechSynthesis.speak(u); return u; }
@@ -1655,7 +1673,7 @@ function fStop(){ if(!fOn) return; fOn=false; clearTimeout(fTimer); try{ speechS
 function fSentences(){ const out=[]; let cur=[]; cells.forEach((c,i)=>{ cur.push(c); const a=c.el.closest('.line'), b=cells[i+1]&&cells[i+1].el.closest('.line'); if((c.punct&&/[。！？；!?;]/.test(c.c))||a!==b){ out.push(cur); cur=[]; } }); if(cur.length) out.push(cur); return out; }
 function fSpeak(list,si){
   if(!fOn) return; if(si>=list.length){ fStop(); toast('跟讀完成 👏'); return; }
-  const S=list[si], u=new SpeechSynthesisUtterance(S.map(cellTTS).join('')); u.lang=(region==='pu')?'zh-CN':'zh-TW'; const v=pickVoice(); if(v) u.voice=v; u.rate=ttsRate();
+  const S=list[si], u=new SpeechSynthesisUtterance(leadPause(tidyYou(S.map(cellTTS).join('')))); u.lang=(region==='pu')?'zh-CN':'zh-TW'; const v=pickVoice(); if(v) u.voice=v; u.rate=ttsRate();
   let k=-1; const adv=n=>{ if(n<=k||n>=S.length) return; if(k>=0){ S[k].el.classList.remove('fcur'); S[k].el.classList.add('fdone'); } k=n; S[k].el.classList.add('fcur'); try{ S[k].el.scrollIntoView({block:'nearest',behavior:'smooth'}); }catch(e){} };
   const per=Math.max(110,stepDelay()*0.9);
   const run=()=>{ if(!fOn) return; fTimer=setTimeout(()=>{ if(k+1<=S.length-2) adv(k+1); run(); },per); };
@@ -1667,7 +1685,7 @@ function fSpeak(list,si){
 function followStart(){
   if(!('speechSynthesis' in window)){ toast('此瀏覽器不支援語音朗讀'); return; }
   reset(); fClear(); fOn=true; followBtn.textContent='⏹ 停止跟讀'; followBtn.classList.add('on');
-  ensureVoicesLoaded(()=>{ if(!fOn) return; if(!pickVoice()){ toast('找不到中文語音，請確認裝置已安裝中文語音包'); fStop(); return; } fSpeak(fSentences(),0); });
+  ensureVoicesLoaded(()=>{ if(!fOn) return; if(!pickVoice()){ toast('找不到中文語音，請確認裝置已安裝中文語音包'); fStop(); return; } fTimer=setTimeout(()=>{ if(fOn) fSpeak(fSentences(),0); },900); });
 }
 followBtn.addEventListener('click',()=>{ if(fOn){ fStop(); fClear(); } else followStart(); });
 const _stopTTS=stopTTS; stopTTS=function(){ _stopTTS(); fStop(); };
